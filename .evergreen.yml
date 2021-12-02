@@ -15,6 +15,8 @@ variables:
       permissions: public-read
       content_type: application/octet-stream
   - &compass-env
+      CI: "1"
+      EVERGREEN: "1"
       EVERGREEN_AUTHOR: ${author}
       EVERGREEN_BRANCH_NAME: ${branch_name}
       EVERGREEN_BUILD_ID: ${build_id}
@@ -28,12 +30,31 @@ variables:
       EVERGREEN_TASK_URL: https://evergreen.mongodb.com/task/${task_id}
       EVERGREEN_VERSION_ID: ${version_id}
       EVERGREEN_WORKDIR: ${workdir}
+      NODE_JS_VERSION: "14.17.5"
+      NPM_VERSION: "7"
+      # secrets
       HADRON_METRICS_BUGSNAG_KEY: ${metrics_bugsnag_key}
       HADRON_METRICS_INTERCOM_APP_ID: ${metrics_intercom_app_id}
       HADRON_METRICS_STITCH_APP_ID: ${metrics_stitch_app_id}
       HADRON_METRICS_SEGMENT_API_KEY: ${metrics_segment_api_key}
-      NODE_JS_VERSION: "14.17.5"
-      NPM_VERSION: "7"
+      E2E_TESTS_METRICS_URI: ${e2e_tests_metrics_string}
+      E2E_TESTS_ATLAS_HOST: ${e2e_tests_atlas_host}
+      E2E_TESTS_DATA_LAKE_HOST: ${e2e_tests_data_lake_host}
+      E2E_TESTS_SERVERLESS_HOST: ${e2e_tests_serverless_host}
+      E2E_TESTS_ANALYTICS_NODE_HOST: ${e2e_tests_analytics_node_host}
+      E2E_TESTS_FREE_TIER_HOST: ${e2e_tests_free_tier_host}
+      E2E_TESTS_ATLAS_USERNAME: ${e2e_tests_atlas_username}
+      E2E_TESTS_ATLAS_PASSWORD: ${e2e_tests_atlas_password}
+      E2E_TESTS_ATLAS_X509_PEM: ${e2e_tests_atlas_x509_pem}
+      NOTARY_URL: http://notary-service.build.10gen.cc:5000
+      NOTARY_AUTH_TOKEN: ${signing_auth_token}
+      NOTARY_SIGNING_KEY: ${signing_key_name}
+      NOTARY_SIGNING_COMMENT: Evergreen project mongodb/compass ${revision} - ${build_variant} - ${branch_name}
+      APPLE_CREDENTIALS: '{"appleUsername": "${apple_username}", "applePassword": "${apple_password}"}'
+      GITHUB_TOKEN: ${devtoolsbot_github_token}
+      DOWNLOAD_CENTER_AWS_ACCESS_KEY_ID: ${aws_key_evergreen_integrations}
+      DOWNLOAD_CENTER_AWS_SECRET_ACCESS_KEY: ${aws_secret_evergreen_integrations}
+
 
 post:
   - &save-diagnostic-file
@@ -86,8 +107,6 @@ functions:
           set -e
 
           eval $(node scripts/print-compass-env.js);
-          echo "NODE_JS_VERSION: ${NODE_JS_VERSION}";
-          echo "NPM_VERSION: ${NPM_VERSION}";
 
           bash .evergreen/preinstall.sh
 
@@ -145,16 +164,6 @@ functions:
 
           bash .evergreen/pretest.sh
 
-          export E2E_TESTS_METRICS_URI="${e2e_tests_metrics_string}"
-          export E2E_TESTS_ATLAS_HOST="${e2e_tests_atlas_host}"
-          export E2E_TESTS_DATA_LAKE_HOST="${e2e_tests_data_lake_host}"
-          export E2E_TESTS_SERVERLESS_HOST="${e2e_tests_serverless_host}"
-          export E2E_TESTS_ANALYTICS_NODE_HOST="${e2e_tests_analytics_node_host}"
-          export E2E_TESTS_FREE_TIER_HOST="${e2e_tests_free_tier_host}"
-          export E2E_TESTS_ATLAS_USERNAME="${e2e_tests_atlas_username}"
-          export E2E_TESTS_ATLAS_PASSWORD="${e2e_tests_atlas_password}"
-          export E2E_TESTS_ATLAS_X509_PEM="${e2e_tests_atlas_x509_pem}"
-
           # NOTE (@imlucas) Starting with MongoDB 4.0.4, the Server binaries
           # have dropped support for macOS 10.10 because it is now outside
           # of the supported version range.
@@ -191,15 +200,19 @@ functions:
         shell: bash
         env:
           <<: *compass-env
+          # TODO: npm_loglevel, debug, compass_distribution
         script: |
           set -e
           eval $(node scripts/print-compass-env.js);
 
+          # TODO: move
           cat <<EOF_BUILD_SH > ~/compass_package.sh
           #! /usr/bin/env bash
+          # TODO: why?
           cd $(pwd)
 
           # Load environment variables
+          # TODO: won't be needed once it is a script
           eval $(node scripts/print-compass-env.js);
 
           # For debugging any problems when the notary service fails.
@@ -207,16 +220,12 @@ functions:
           export DEBUG=mongodb-notary*
 
           # Required to sign release assets
-          export NOTARY_URL="http://notary-service.build.10gen.cc:5000"
-          export NOTARY_AUTH_TOKEN="${signing_auth_token}"
-          export NOTARY_SIGNING_KEY="${signing_key_name}"
-          export NOTARY_SIGNING_COMMENT="Evergreen project mongodb/compass ${revision} - ${build_variant} - ${branch_name}"
 
           if [ `uname` == Darwin ]; then
             # We do print the environment during the build process in a few places
             # but we probably should stop doing that. After that, we can go back
             # to using plain APPLE_USERNAME and APPLE_PASSWORD environment variables.
-            echo '{"appleUsername": "${apple_username}", "applePassword": "${apple_password}"}' > /tmp/compass-apple-cred.json
+            echo $APPLE_CREDENTIALS > /tmp/compass-apple-cred.json
             export APPLE_CREDENTIALS_FILE="/tmp/compass-apple-cred.json"
           fi
 
@@ -274,13 +283,6 @@ functions:
         set -e
         # Load environment variables
         eval $(node scripts/print-compass-env.js);
-
-        # Required to upload release assets to GitHub
-        export GITHUB_TOKEN=${devtoolsbot_github_token}
-
-        # Required to upload release assets to s3 for download center
-        export DOWNLOAD_CENTER_AWS_ACCESS_KEY_ID=${aws_key_evergreen_integrations}
-        export DOWNLOAD_CENTER_AWS_SECRET_ACCESS_KEY=${aws_secret_evergreen_integrations}
 
         echo "Uploading release assets to S3 and GitHub if needed..."
         npm run upload ${compass_distribution} --workspace mongodb-compass
